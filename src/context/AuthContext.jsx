@@ -1,3 +1,4 @@
+
 import {
   createContext,
   useContext,
@@ -6,74 +7,139 @@ import {
   useState,
   useCallback,
 } from "react";
-import { api, clearAuth, getStoredUser, setAuth } from "../api/apiClient";
+
+import {
+  api,
+  clearAuth,
+  getStoredUser,
+  setAuth,
+} from "../api/apiClient";
+
+// ==========================================
+// AUTH CONTEXT
+// ==========================================
 
 const AuthContext = createContext(null);
 
-// ✅ helper: أين نروح بعد الموافقة/تحديث الدور؟
+// ==========================================
+// API BASE URL
+// Local development + Production
+// ==========================================
+
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL ||
+  "http://127.0.0.1:8000"
+)
+  .replace(/\/api\/?$/, "")
+  .replace(/\/+$/, "");
+
+// ==========================================
+// REDIRECT AFTER APPROVAL / ROLE UPDATE
+// ==========================================
+
 const getPostApprovalPath = (u) => {
   if (!u) return "/login";
 
   const role = Number(u.role);
-  const hasSetup = !!(u.hasSetup ?? u.has_setup); // ✅ يدعم الاسمين
+  const hasSetup = !!(u.hasSetup ?? u.has_setup);
 
-  // ✅ الأدمن
-  if (role === 1) return "/admin/dashboard";
+  // Admin
+  if (role === 1) {
+    return "/admin/dashboard";
+  }
 
-  // ✅ العيادات/الأطباء = 5
+  // Doctor
   if (role === 5) {
     return hasSetup ? "/app/dashboard" : "/app/setup";
   }
 
-  // (اختياري) أدوار ثانية لاحقاً
-  // if (role === 4) return hasSetup ? "/app/store/dashboard" : "/app/setup";
-  // if (role === 3) return hasSetup ? "/app/shelter/dashboard" : "/app/setup";
-
+  // Other roles use the default feed.
   return "/app/feed";
 };
 
+// ==========================================
+// AUTH PROVIDER
+// ==========================================
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(getStoredUser());
-  const [token, setToken] = useState(localStorage.getItem("token"));
+  const [user, setUser] = useState(() => getStoredUser());
+
+  const [token, setToken] = useState(() =>
+    localStorage.getItem("token")
+  );
+
   const [loading, setLoading] = useState(true);
 
-  // ✅ تحديث المستخدم محلياً + localStorage (مفيد بعد تحديث البروفايل)
+  // ========================================
+  // UPDATE USER LOCALLY
+  // ========================================
+
   const updateUserLocal = useCallback((patch) => {
     setUser((prev) => {
-      const next = { ...(prev || {}), ...(patch || {}) };
+      const next = {
+        ...(prev || {}),
+        ...(patch || {}),
+      };
+
       setAuth({ user: next });
+
       return next;
     });
   }, []);
 
-  // ✅ إعادة جلب بياناتي من السيرفر (بعد حفظ البروفايل أو بعد الموافقة أو بأي وقت)
+  // ========================================
+  // REFRESH AUTHENTICATED USER
+  // ========================================
+
   const refreshMe = useCallback(async () => {
     const storedToken = localStorage.getItem("token");
-    if (!storedToken) return null;
+
+    if (!storedToken) {
+      return null;
+    }
 
     try {
-      // ✅ الأساسي: api.me() => /api/auth/me
+      // Primary API request
       const data = await api.me();
+
       const meUser = data?.user ?? data;
+
+      if (!meUser) {
+        throw new Error("User data is missing");
+      }
 
       setUser(meUser);
       setToken(storedToken);
-      setAuth({ user: meUser }); // ✅ حدّث localStorage دائماً
+      setAuth({ user: meUser });
 
       return meUser;
-    } catch (e) {
-      // ✅ fallback صريح (لو صار مشكلة بapiClient)
+    } catch  {
+      // Fallback uses configured API URL,
+      // never a hardcoded localhost address.
       try {
-        const res = await fetch("http://127.0.0.1:8000/api/auth/me", {
-          headers: {
-            Authorization: `Bearer ${storedToken}`,
-            Accept: "application/json",
-          },
-        });
+        const response = await fetch(
+          `${API_BASE}/api/auth/me`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${storedToken}`,
+              Accept: "application/json",
+            },
+          }
+        );
 
-        if (!res.ok) throw new Error("auth/me endpoint failed");
-        const data = await res.json();
+        if (!response.ok) {
+          throw new Error(
+            `Authentication failed: ${response.status}`
+          );
+        }
+
+        const data = await response.json();
         const meUser = data?.user ?? data;
+
+        if (!meUser) {
+          throw new Error("User data is missing");
+        }
 
         setUser(meUser);
         setToken(storedToken);
@@ -81,47 +147,77 @@ export function AuthProvider({ children }) {
 
         return meUser;
       } catch {
-        // إذا فشل كل شيء، نظّف
+        // Clear invalid session if both requests fail.
         clearAuth();
+
         setUser(null);
         setToken(null);
+
         return null;
       }
     }
   }, []);
 
-  // ✅ دالة جاهزة لزر "متابعة بالدور الجديد"
+  // ========================================
+  // CONTINUE AFTER ACCOUNT APPROVAL
+  // ========================================
+
   const continueAfterApproval = useCallback(async () => {
     const meUser = await refreshMe();
-    const u = meUser || getStoredUser(); // ✅ fallback مهم
-    return getPostApprovalPath(u);
+
+    const currentUser = meUser || getStoredUser();
+
+    return getPostApprovalPath(currentUser);
   }, [refreshMe]);
 
-  // ✅ عند تشغيل التطبيق → تحقق من التوكن + حمّل user
+  // ========================================
+  // INITIAL AUTHENTICATION CHECK
+  // ========================================
+
   useEffect(() => {
+    let mounted = true;
+
     const boot = async () => {
       try {
         const storedToken = localStorage.getItem("token");
 
         if (!storedToken) {
-          setLoading(false);
           return;
         }
 
         await refreshMe();
       } finally {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     };
 
     boot();
+
+    return () => {
+      mounted = false;
+    };
   }, [refreshMe]);
 
-  // ✅ LOGIN
-  const login = async (email, password) => {
-    const data = await api.login({ email, password });
+  // ========================================
+  // LOGIN
+  // ========================================
 
-    setAuth({ token: data.token, user: data.user });
+  const login = async (email, password) => {
+    const data = await api.login({
+      email,
+      password,
+    });
+
+    if (!data?.token || !data?.user) {
+      throw new Error("Invalid login response");
+    }
+
+    setAuth({
+      token: data.token,
+      user: data.user,
+    });
 
     setUser(data.user);
     setToken(data.token);
@@ -129,20 +225,33 @@ export function AuthProvider({ children }) {
     return data.user;
   };
 
-  // ✅ LOGOUT
+  // ========================================
+  // LOGOUT
+  // ========================================
+
   const logout = async () => {
     try {
       await api.logout();
     } catch {
-      // حتى لو فشل الطلب، نمسح محلياً
+      // Clear locally even if server logout fails.
     }
 
     clearAuth();
+
     setUser(null);
     setToken(null);
   };
 
-  const isAdmin = !!user && Number(user.role) === 1;
+  // ========================================
+  // ADMIN CHECK
+  // ========================================
+
+  const isAdmin =
+    !!user && Number(user.role) === 1;
+
+  // ========================================
+  // PROVIDER VALUE
+  // ========================================
 
   const value = useMemo(
     () => ({
@@ -169,7 +278,15 @@ export function AuthProvider({ children }) {
     ]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
+
+// ==========================================
+// CUSTOM AUTH HOOK
+// ==========================================
 
 export const useAuth = () => useContext(AuthContext);
