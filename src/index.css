@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+
+@import "tailwindcss";
+@plugin './hero.js';
+/* Note: You may need to change the path to fit your project structure */
+@source '../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}';
+@custom-variant dark (&:is(.dark *));
+
+
+:root {
+  /* ألوان وضع النهار */
+  background-color: #ffffff;
+  color: #000000;
+}
+
+.dark {
+  background-color: #101828; 
+  color: #ffffff;
+  color-scheme: dark;
+}
+
+body {
+  @apply transition-colors duration-500;
+  background-color: inherit;
+  color: inherit;
+}
+@theme {
+    --color-mainColor:#F5A743;
+    --color-secondaryColor:#FFC800;
+    --color-TertiaryColor:#E8A34D;
+    --color-fourthColor:#FFEFB5;
+    --color-fivethColor:#FFF9E6;
+    --color-sixColor:#41416E;
+    --color-sevenColor:#F5A742;
+    
+
+}
