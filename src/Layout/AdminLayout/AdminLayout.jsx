@@ -1,6 +1,6 @@
-import React from 'react'
+﻿import React from 'react'
 import { Outlet } from 'react-router-dom'
-import MainNavbar from '../../components/Navbar/mainNavbar'
+import MainNavbar from '../../components/Navbar/MainNavbar'
 
 export default function AdminLayout() {
   return (<>
@@ -9,3 +9,4 @@ export default function AdminLayout() {
     </>
   )
 }
+
